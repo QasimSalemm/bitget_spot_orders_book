@@ -13,6 +13,13 @@ from websocket import WebSocketApp
 import pandas as pd
 import streamlit as st
 from threading import Lock, Event
+    
+def Bitget_Spot_Orderbook():
+    st.set_page_config(
+    page_title="Contact Us - Facebook Reels Downloader",
+    page_icon="images/bitget_spot_orderbook.png",
+    layout="wide"
+)
 
 # -----------------------------
 # Local Css All Buttons
@@ -22,6 +29,11 @@ def local_css(file_name: str):
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 # Apply global styles
 local_css("styles/style.css")
+
+st.title("Bitget Spot Orderbook Live Tracker — Real-Time Crypto Market Viewer")
+st.write("Monitor live cryptocurrency orders-book with the Bitget Spot Orderbook Viewer, a real-time Streamlit app that connects directly to Bitget’s WebSocket and REST APIs.")
+st.divider()
+
 
 # decimal precision
 getcontext().prec = 28
@@ -446,10 +458,6 @@ if "manager" not in st.session_state:
 
 mgr: BitgetManager = st.session_state.manager
 
-# UI
-st.set_page_config(page_title="Bitget Top-N Orderbook", layout="wide")
-st.title("Orderbook Bitget Spot trading")
-
 # Sidebar controls
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -580,3 +588,5 @@ else:
 
 st.markdown("---")
 st.caption("Notes: background threads perform WebSocket + REST polling. Change symbol and Top N via inputs, then click Start/Restart.")
+if __name__ == "__main__":
+    Bitget_Spot_Orderbook()
