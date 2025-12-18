@@ -13,10 +13,11 @@ from websocket import WebSocketApp
 import pandas as pd
 import streamlit as st
 from threading import Lock, Event
+import ssl
     
 def Bitget_Spot_Orderbook():
     st.set_page_config(
-    page_title="Contact Us - Facebook Reels Downloader",
+    page_title="Bitget spot order-book deep analyze",
     page_icon="images/bitget_spot_orderbook.png",
     layout="wide"
 )
@@ -104,6 +105,7 @@ class BitgetManager:
         self.symbol = "BTCUSDT"
         self.top_n = 5
         self.running = False
+        self.last_update_time = time.time()
 
     def _clear_books(self):
         with self._lock:
@@ -167,6 +169,7 @@ class BitgetManager:
                         self.asks.pop(p, None)
                     else:
                         self.asks[p] = q
+            self.last_update_time = time.time()
 
     # def apply_trades(self, blocks):
     #     with self._lock:
@@ -224,11 +227,12 @@ class BitgetManager:
         while not self._stop.is_set():
             try:
                 self._ws_app = WebSocketApp(WS_URL,
+                                           header={"User-Agent": "bitget-top-n/1.0"},
                                            on_open=self._on_open,
                                            on_message=self._on_message,
                                            on_error=self._on_error,
                                            on_close=self._on_close)
-                self._ws_app.run_forever(ping_interval=20, ping_timeout=10)
+                self._ws_app.run_forever(ping_interval=20, ping_timeout=10, sslopt={"cert_reqs": ssl.CERT_NONE})
             except Exception as e:
                 if self._stop.is_set(): break
                 print("ws_runloop exception, reconnecting in", backoff, e)
@@ -354,6 +358,37 @@ class BitgetManager:
             except Exception as e:
                 print("Error calculating totals:", e)
                 return Decimal(0), Decimal(0)
+
+    def get_metrics(self):
+        with self._lock:
+            # Spread
+            best_bid = max(self.bids.keys()) if self.bids else Decimal(0)
+            best_ask = min(self.asks.keys()) if self.asks else Decimal(0)
+            spread = Decimal(0)
+            spread_pct = Decimal(0)
+            if best_bid > 0 and best_ask > 0:
+                spread = best_ask - best_bid
+                spread_pct = (spread / best_ask) * 100
+
+            # Imbalance (Volume)
+            # Simple imbalance: Buy Vol / (Buy Vol + Sell Vol)
+            total_buy_vol = sum(self.bids.values())
+            total_sell_vol = sum(self.asks.values())
+            imbalance = 0.5
+            if (total_buy_vol + total_sell_vol) > 0:
+                imbalance = float(total_buy_vol / (total_buy_vol + total_sell_vol))
+            
+            # Latency (approx)
+            latency = time.time() - self.last_update_time
+            
+            return {
+                "best_bid": best_bid,
+                "best_ask": best_ask,
+                "spread": spread,
+                "spread_pct": spread_pct,
+                "imbalance": imbalance,
+                "latency": latency
+            }
 
     def build_dataframe(self, TOP_N):
         with self._lock:
@@ -533,15 +568,8 @@ st.write("**Top :** ", mgr.top_n)
 # status_col2.metric("Symbol", mgr.symbol)
 # status_col3.metric("Top N", mgr.top_n)
 
-# auto-refresh helper
-# using streamlit-autorefresh if available; fallback: do not auto-refresh (user can manual refresh)
-try:
-    from streamlit_autorefresh import st_autorefresh
-    # this will rerun the script every refresh_ms milliseconds
-    st_autorefresh(interval=refresh_ms, key="autorefresh")
-except Exception:
-    # fallback: show a note
-    st.caption("Install 'streamlit-autorefresh' to enable auto page refresh. Without it, press the browser refresh button to update.")
+# Auto-update logic is handled at the end of the script to ensure full page render first
+pass
 
 # Table + current price
 df = mgr.latest_df
@@ -549,6 +577,19 @@ cur_price = df.attrs.get("current_price", mgr.last_price_str or "N/A") if hasatt
 price_icon = df.attrs.get("price_icon", "●") if hasattr(df, "attrs") else "●"
 
 st.subheader(f"Current Price: {cur_price} {price_icon}")
+
+# --- Metrics Row ---
+metrics = mgr.get_metrics()
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Best Bid", f"{metrics['best_bid']:,.2f}")
+m2.metric("Best Ask", f"{metrics['best_ask']:,.2f}")
+m3.metric("Spread", f"{metrics['spread']:.2f} ({metrics['spread_pct']:.3f}%)")
+# Imbalance formatted as Buy Pressue %
+m4.metric("Orderbook Imbalance (Buy side)", f"{metrics['imbalance']*100:.1f}%", 
+          delta=f"{(metrics['imbalance']-0.5)*100:.1f}%" if metrics['imbalance'] != 0.5 else None)
+
+st.caption(f"Last update: {metrics['latency']:.2f}s ago")
+
 st.markdown("**Orderbook (Top by QTY)**")
 
 if df is None or df.empty:
@@ -588,5 +629,12 @@ else:
 
 st.markdown("---")
 st.caption("Notes: background threads perform WebSocket + REST polling. Change symbol and Top N via inputs, then click Start/Restart.")
+
+if mgr.running:
+    time.sleep(refresh_ms / 1000)
+    try:
+        st.rerun()
+    except AttributeError:
+        st.experimental_rerun()
 if __name__ == "__main__":
     Bitget_Spot_Orderbook()
