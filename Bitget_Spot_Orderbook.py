@@ -14,6 +14,8 @@ import pandas as pd
 import streamlit as st
 from threading import Lock, Event
 import ssl
+from pathlib import Path
+
     
 def Bitget_Spot_Orderbook():
     st.set_page_config(
@@ -21,6 +23,19 @@ def Bitget_Spot_Orderbook():
     page_icon="images/bitget_spot_orderbook.png",
     layout="wide"
 )
+
+def local_css(file_name):
+    try:
+        # Use pathlib to robustly find the file relative to this script
+        css_file = Path(__file__).parent / file_name
+        with open(css_file) as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.warning(f"CSS file not found: {file_name}")
+    except Exception as e:
+        pass # Ignore other errors to avoid crashing
+
+local_css("styles/style.css")
 
 st.title("Bitget Spot Orderbook Live Tracker — Real-Time Crypto Market Viewer")
 st.write("Monitor live cryptocurrency orders-book with the Bitget Spot Orderbook Viewer, a real-time Streamlit app that connects directly to Bitget’s WebSocket and REST APIs.")
