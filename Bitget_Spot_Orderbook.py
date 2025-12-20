@@ -22,15 +22,6 @@ def Bitget_Spot_Orderbook():
     layout="wide"
 )
 
-# -----------------------------
-# Local Css All Buttons
-# -----------------------------
-def local_css(file_name: str):
-    with open(file_name) as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-# Apply global styles
-local_css("styles/style.css")
-
 st.title("Bitget Spot Orderbook Live Tracker — Real-Time Crypto Market Viewer")
 st.write("Monitor live cryptocurrency orders-book with the Bitget Spot Orderbook Viewer, a real-time Streamlit app that connects directly to Bitget’s WebSocket and REST APIs.")
 st.divider()
@@ -390,6 +381,27 @@ class BitgetManager:
                 "latency": latency
             }
 
+    def get_support_resistance(self, count=3):
+        """
+        Identify top 'count' price levels with highest quantity for Bids (Support) and Asks (Resistance).
+        Returns: {
+            "supports": [(price, qty), ...],
+            "resistances": [(price, qty), ...]
+        }
+        """
+        with self._lock:
+            # Sort by Quantity descending
+            top_bids = sorted(self.bids.items(), key=lambda x: x[1], reverse=True)[:count]
+            top_asks = sorted(self.asks.items(), key=lambda x: x[1], reverse=True)[:count]
+            
+            # Sort the results by Price for display logic if needed, 
+            # BUT usually for S/R we want to see the strongest levels regardless of distance.
+            # Keeping them sorted by strength (Quantity) is better for "Real Support/Resist".
+            return {
+                "supports": top_bids,
+                "resistances": top_asks
+            }
+
     def build_dataframe(self, TOP_N):
         with self._lock:
             top_asks = sorted(self.asks.items(), key=lambda x: x[1], reverse=True)[:TOP_N]
@@ -590,13 +602,57 @@ m4.metric("Orderbook Imbalance (Buy side)", f"{metrics['imbalance']*100:.1f}%",
 
 st.caption(f"Last update: {metrics['latency']:.2f}s ago")
 
+# --- Support & Resistance (Highest Liquidity) ---
+sr_levels = mgr.get_support_resistance(count=3)
+
+st.markdown("---")
+st.subheader("🧱 Market Depth Analysis")
+
+# Use metrics for the absolute strongest levels
+best_support = sr_levels["supports"][0] if sr_levels["supports"] else (0, 0)
+best_resistance = sr_levels["resistances"][0] if sr_levels["resistances"] else (0, 0)
+
+col_sr1, col_sr2 = st.columns(2)
+col_sr1.metric("Strongest Support (Bid Wall)", f"{best_support[0]}", f"{best_support[1]} Qty", delta_color="normal")
+col_sr2.metric("Strongest Resistance (Sell Wall)", f"{best_resistance[0]}", f"-{best_resistance[1]} Qty", delta_color="inverse")
+
+# Show the rest in a small expander if desired, or just below
+with st.expander("View Top 3 Support & Resistance Levels"):
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        st.markdown("**Support Levels**")
+        st.dataframe(pd.DataFrame(sr_levels["supports"], columns=["Price", "Qty"]), hide_index=True, use_container_width=True)
+    with sc2:
+        st.markdown("**Resistance Levels**")
+        st.dataframe(pd.DataFrame(sr_levels["resistances"], columns=["Price", "Qty"]), hide_index=True, use_container_width=True)
+
+st.markdown("---")
 st.markdown("**Orderbook (Top by QTY)**")
 
 if df is None or df.empty:
     st.info("No data yet — click Start to begin streaming.")
 else:
-    # Display as a wide table
-    st.dataframe(df)
+    # --- Pure Streamlit Styling with Pandas Styler ---
+    def color_coding(s):
+        if s.name == "SELL PRICE":
+            return ['color: #ff4b4b'] * len(s) # Streamlit Red
+        elif s.name == "BUY PRICE":
+            return ['color: #09ab3b'] * len(s) # Streamlit Green
+        return [''] * len(s)
+
+    # Apply Styler
+    styler = df.style.apply(color_coding, axis=0)
+    
+    # Display
+    st.dataframe(
+        styler,
+        use_container_width=True,
+        height=(35 * (len(df) + 1)) if len(df) < 20 else 600,
+        column_config={
+            "SELL VALUE": st.column_config.NumberColumn("SELL VALUE (USDT)"),
+            "BUY VALUE": st.column_config.NumberColumn("BUY VALUE (USDT)")
+        }
+    )
 
     # --- Totals across FULL orderbook ---
     try:
